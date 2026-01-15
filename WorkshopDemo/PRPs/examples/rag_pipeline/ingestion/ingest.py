@@ -348,7 +348,7 @@ class DocumentIngestionPipeline:
                 # Insert document
                 document_result = await conn.fetchrow(
                     """
-                    INSERT INTO documents (title, source, content, metadata)
+                    INSERT INTO wd_documents (title, source, content, metadata)
                     VALUES ($1, $2, $3, $4)
                     RETURNING id::text
                     """,
@@ -370,7 +370,7 @@ class DocumentIngestionPipeline:
                     
                     await conn.execute(
                         """
-                        INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
+                        INSERT INTO wd_chunks (document_id, content, embedding, chunk_index, metadata, token_count)
                         VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
                         """,
                         document_id,
@@ -387,13 +387,11 @@ class DocumentIngestionPipeline:
         """Clean existing data from databases."""
         logger.warning("Cleaning existing data from databases...")
         
-        # Clean PostgreSQL
+        # Clean PostgreSQL (wd_ prefixed tables only)
         async with db_pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM messages")
-                await conn.execute("DELETE FROM sessions")
-                await conn.execute("DELETE FROM chunks")
-                await conn.execute("DELETE FROM documents")
+                await conn.execute("DELETE FROM wd_chunks")
+                await conn.execute("DELETE FROM wd_documents")
         
         logger.info("Cleaned PostgreSQL database")
         

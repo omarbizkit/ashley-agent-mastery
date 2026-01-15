@@ -1,5 +1,9 @@
 """
 Database utilities for PostgreSQL connection and operations.
+
+All database objects use wd_ prefix (WorkshopDemo) to avoid conflicts.
+Tables: wd_documents, wd_chunks
+Functions: wd_match_chunks, wd_hybrid_search, wd_get_document_chunks
 """
 
 import os
@@ -93,7 +97,7 @@ async def get_document(document_id: str) -> Optional[Dict[str, Any]]:
     async with db_pool.acquire() as conn:
         result = await conn.fetchrow(
             """
-            SELECT 
+            SELECT
                 id::text,
                 title,
                 source,
@@ -101,7 +105,7 @@ async def get_document(document_id: str) -> Optional[Dict[str, Any]]:
                 metadata,
                 created_at,
                 updated_at
-            FROM documents
+            FROM wd_documents
             WHERE id = $1::uuid
             """,
             document_id
@@ -139,7 +143,7 @@ async def list_documents(
     """
     async with db_pool.acquire() as conn:
         query = """
-            SELECT 
+            SELECT
                 d.id::text,
                 d.title,
                 d.source,
@@ -147,8 +151,8 @@ async def list_documents(
                 d.created_at,
                 d.updated_at,
                 COUNT(c.id) AS chunk_count
-            FROM documents d
-            LEFT JOIN chunks c ON d.id = c.document_id
+            FROM wd_documents d
+            LEFT JOIN wd_chunks c ON d.id = c.document_id
         """
         
         params = []
@@ -206,7 +210,7 @@ async def vector_search(
         embedding_str = '[' + ','.join(map(str, embedding)) + ']'
         
         results = await conn.fetch(
-            "SELECT * FROM match_chunks($1::vector, $2)",
+            "SELECT * FROM wd_match_chunks($1::vector, $2)",
             embedding_str,
             limit
         )
@@ -249,7 +253,7 @@ async def hybrid_search(
         embedding_str = '[' + ','.join(map(str, embedding)) + ']'
         
         results = await conn.fetch(
-            "SELECT * FROM hybrid_search($1::vector, $2, $3, $4)",
+            "SELECT * FROM wd_hybrid_search($1::vector, $2, $3, $4)",
             embedding_str,
             query_text,
             limit,
@@ -285,7 +289,7 @@ async def get_document_chunks(document_id: str) -> List[Dict[str, Any]]:
     """
     async with db_pool.acquire() as conn:
         results = await conn.fetch(
-            "SELECT * FROM get_document_chunks($1::uuid)",
+            "SELECT * FROM wd_get_document_chunks($1::uuid)",
             document_id
         )
         

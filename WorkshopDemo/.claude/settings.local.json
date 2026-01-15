@@ -23,7 +23,11 @@
       "Bash(cp:*)",
       "Bash(sed:*)",
       "Bash(./venv/Scripts/python.exe -m pip:*)",
-      "Bash(./venv/Scripts/python.exe -m ingestion.ingest)"
+      "Bash(./venv/Scripts/python.exe -m ingestion.ingest)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Bash(npx @anthropic-ai/claude-code:*)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }

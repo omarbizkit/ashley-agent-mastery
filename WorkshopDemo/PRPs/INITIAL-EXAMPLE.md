@@ -59,7 +59,7 @@ Your responses should be accurate and based on available data, well-structured a
 - Tool Integration: https://ai.pydantic.dev/tools/
 - Testing Patterns: https://ai.pydantic.dev/testing/
 - Model Providers: https://ai.pydantic.dev/models/
-- Use Archon MCP server to query for Pydantic AI and Graphiti documentation and code examples
+- Use Context7 MCP server to query for Pydantic AI and Graphiti documentation and code examples
 
 ## OTHER CONSIDERATIONS:
 

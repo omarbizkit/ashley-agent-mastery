@@ -73,6 +73,14 @@ class EntityRelationship(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class Message(BaseModel):
+    """Chat message model."""
+    role: Literal["user", "assistant", "system"]
+    content: str
+    timestamp: Optional[datetime] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SearchResponse(BaseModel):
     """Search response model."""
     results: List[ChunkResult] = Field(default_factory=list)

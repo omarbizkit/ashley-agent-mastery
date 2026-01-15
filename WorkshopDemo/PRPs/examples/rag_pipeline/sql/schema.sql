@@ -1,15 +1,20 @@
+-- WorkshopDemo RAG Pipeline Schema
+-- All objects prefixed with wd_ to avoid conflicts with existing database objects
+
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-DROP TABLE IF EXISTS chunks CASCADE;
-DROP TABLE IF EXISTS documents CASCADE;
-DROP INDEX IF EXISTS idx_chunks_embedding;
-DROP INDEX IF EXISTS idx_chunks_document_id;
-DROP INDEX IF EXISTS idx_documents_metadata;
-DROP INDEX IF EXISTS idx_chunks_content_trgm;
+-- Drop existing WorkshopDemo objects if they exist
+DROP TABLE IF EXISTS wd_chunks CASCADE;
+DROP TABLE IF EXISTS wd_documents CASCADE;
+DROP INDEX IF EXISTS idx_wd_chunks_embedding;
+DROP INDEX IF EXISTS idx_wd_chunks_document_id;
+DROP INDEX IF EXISTS idx_wd_documents_metadata;
+DROP INDEX IF EXISTS idx_wd_chunks_content_trgm;
 
-CREATE TABLE documents (
+-- Documents table for storing source documents
+CREATE TABLE wd_documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
     source TEXT NOT NULL,
@@ -19,12 +24,13 @@ CREATE TABLE documents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_documents_metadata ON documents USING GIN (metadata);
-CREATE INDEX idx_documents_created_at ON documents (created_at DESC);
+CREATE INDEX idx_wd_documents_metadata ON wd_documents USING GIN (metadata);
+CREATE INDEX idx_wd_documents_created_at ON wd_documents (created_at DESC);
 
-CREATE TABLE chunks (
+-- Chunks table for storing document chunks with embeddings
+CREATE TABLE wd_chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    document_id UUID NOT NULL REFERENCES wd_documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     embedding vector(1536),
     chunk_index INTEGER NOT NULL,
@@ -33,12 +39,13 @@ CREATE TABLE chunks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1);
-CREATE INDEX idx_chunks_document_id ON chunks (document_id);
-CREATE INDEX idx_chunks_chunk_index ON chunks (document_id, chunk_index);
-CREATE INDEX idx_chunks_content_trgm ON chunks USING GIN (content gin_trgm_ops);
+CREATE INDEX idx_wd_chunks_embedding ON wd_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1);
+CREATE INDEX idx_wd_chunks_document_id ON wd_chunks (document_id);
+CREATE INDEX idx_wd_chunks_chunk_index ON wd_chunks (document_id, chunk_index);
+CREATE INDEX idx_wd_chunks_content_trgm ON wd_chunks USING GIN (content gin_trgm_ops);
 
-CREATE OR REPLACE FUNCTION match_chunks(
+-- Vector search function for pure semantic similarity
+CREATE OR REPLACE FUNCTION wd_match_chunks(
     query_embedding vector(1536),
     match_count INT DEFAULT 10
 )
@@ -55,7 +62,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         c.id AS chunk_id,
         c.document_id,
         c.content,
@@ -63,15 +70,16 @@ BEGIN
         c.metadata,
         d.title AS document_title,
         d.source AS document_source
-    FROM chunks c
-    JOIN documents d ON c.document_id = d.id
+    FROM wd_chunks c
+    JOIN wd_documents d ON c.document_id = d.id
     WHERE c.embedding IS NOT NULL
     ORDER BY c.embedding <=> query_embedding
     LIMIT match_count;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION hybrid_search(
+-- Hybrid search function combining vector + TSVector keyword search
+CREATE OR REPLACE FUNCTION wd_hybrid_search(
     query_embedding vector(1536),
     query_text TEXT,
     match_count INT DEFAULT 10,
@@ -93,7 +101,7 @@ AS $$
 BEGIN
     RETURN QUERY
     WITH vector_results AS (
-        SELECT 
+        SELECT
             c.id AS chunk_id,
             c.document_id,
             c.content,
@@ -101,12 +109,12 @@ BEGIN
             c.metadata,
             d.title AS doc_title,
             d.source AS doc_source
-        FROM chunks c
-        JOIN documents d ON c.document_id = d.id
+        FROM wd_chunks c
+        JOIN wd_documents d ON c.document_id = d.id
         WHERE c.embedding IS NOT NULL
     ),
     text_results AS (
-        SELECT 
+        SELECT
             c.id AS chunk_id,
             c.document_id,
             c.content,
@@ -114,11 +122,11 @@ BEGIN
             c.metadata,
             d.title AS doc_title,
             d.source AS doc_source
-        FROM chunks c
-        JOIN documents d ON c.document_id = d.id
+        FROM wd_chunks c
+        JOIN wd_documents d ON c.document_id = d.id
         WHERE to_tsvector('english', c.content) @@ plainto_tsquery('english', query_text)
     )
-    SELECT 
+    SELECT
         COALESCE(v.chunk_id, t.chunk_id) AS chunk_id,
         COALESCE(v.document_id, t.document_id) AS document_id,
         COALESCE(v.content, t.content) AS content,
@@ -135,7 +143,8 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION get_document_chunks(doc_id UUID)
+-- Get all chunks for a specific document
+CREATE OR REPLACE FUNCTION wd_get_document_chunks(doc_id UUID)
 RETURNS TABLE (
     chunk_id UUID,
     content TEXT,
@@ -146,18 +155,19 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         id AS chunk_id,
-        chunks.content,
-        chunks.chunk_index,
-        chunks.metadata
-    FROM chunks
+        wd_chunks.content,
+        wd_chunks.chunk_index,
+        wd_chunks.metadata
+    FROM wd_chunks
     WHERE document_id = doc_id
     ORDER BY chunk_index;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION update_updated_at_column()
+-- Trigger function to auto-update updated_at column
+CREATE OR REPLACE FUNCTION wd_update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
@@ -165,5 +175,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_documents_updated_at BEFORE UPDATE ON documents
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Create trigger for wd_documents table
+DROP TRIGGER IF EXISTS wd_update_documents_updated_at ON wd_documents;
+CREATE TRIGGER wd_update_documents_updated_at BEFORE UPDATE ON wd_documents
+    FOR EACH ROW EXECUTE FUNCTION wd_update_updated_at_column();
