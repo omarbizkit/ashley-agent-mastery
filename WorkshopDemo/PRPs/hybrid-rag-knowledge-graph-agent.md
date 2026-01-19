@@ -18,7 +18,7 @@ This creates a powerful multi-layered search system that understands semantic co
 1. **Pydantic AI Best Practices**: Deep integration with Pydantic AI patterns for agent creation, tools, and dependency injection
 2. **Type Safety First**: Leverage Pydantic AI's type-safe design and Pydantic validation throughout
 3. **Simple Yet Powerful**: Keep the agent minimal with focused tools that do one thing well
-4. **Production Ready**: Include proper error handling, logging, and comprehensive testing
+4. **Easy Setup**: No Docker or complex infrastructure - just run SQL and configure .env
 
 ## Implementation Guidelines: Don't Over-Engineer
 
@@ -66,7 +66,7 @@ Traditional RAG systems only understand semantic similarity. By combining vector
 
 ### External Integrations
 - [x] PostgreSQL with pgvector (asyncpg connection pool)
-- [x] Neo4j with Graphiti (knowledge graph)
+- [x] Neo4j with Graphiti (knowledge graph via Neo4j Aura Free)
 - [x] OpenAI-compatible embeddings API
 
 ### Success Criteria
@@ -173,7 +173,7 @@ def get_llm_model(model_choice: Optional[str] = None) -> OpenAIModel:
 
 ### Pydantic AI Documentation References
 
-IMPORTANT: Make sure you use the Context7 MCP Server for Pydantic AI and Gaphiti documentation to aid in your development.
+IMPORTANT: Make sure you use the Archon (first choice) Context7 (second choice) MCP Server for Pydantic AI and Gaphiti documentation to aid in your development.
 
 **Agent Creation with Dependencies** (https://ai.pydantic.dev/dependencies):
 ```python
@@ -226,34 +226,97 @@ for result in results:
 
 ## Implementation Blueprint
 
-### Prerequisites: Neo4j Setup
+### Prerequisites: Run Schema SQL in Supabase
 
-Before implementing the agent, ensure Neo4j is available:
-
-**Option A: Local Neo4j (Docker)**
-```bash
-# Run Neo4j locally with Docker
-docker run -d \
-  --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/your-password \
-  -e NEO4J_PLUGINS='["apoc"]' \
-  neo4j:latest
-
-# Verify it's running
-curl http://localhost:7474
+**Step 1: Enable pgvector extension**
+In Supabase SQL Editor, run:
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
-**Option B: Neo4j Aura (Cloud)**
-1. Go to https://neo4j.com/cloud/aura/
-2. Create a free AuraDB instance
-3. Copy the connection URI (format: `neo4j+s://xxxxxxxx.databases.neo4j.io`)
-4. Save the password
+**Step 2: Run the schema**
+Copy and paste the contents of `sql/schema.sql` into Supabase SQL Editor and execute.
 
-**Supabase Database Setup:**
-1. Ensure pgvector extension is enabled in Supabase
-2. Run the schema.sql file via Supabase SQL Editor
-3. Get the connection string from: Dashboard > Project Settings > Database > Connection String
+**Step 3: Insert test data**
+Run the following to add sample documents for testing:
+```sql
+-- Insert test documents
+INSERT INTO wd_documents (title, source, content, metadata) VALUES
+('AI Overview', 'test/ai.md', 'Artificial intelligence is transforming industries. Machine learning enables computers to learn from data. Deep learning uses neural networks with many layers.', '{"topic": "AI", "category": "technology"}'),
+('Company Profile: OpenAI', 'test/openai.md', 'OpenAI is an AI research company founded in 2015. Sam Altman is the CEO. They created ChatGPT and GPT-4. OpenAI partners with Microsoft.', '{"topic": "companies", "category": "AI"}'),
+('Cloud Computing Basics', 'test/cloud.md', 'Cloud computing provides on-demand computing resources. AWS, Azure, and Google Cloud are major providers. Serverless computing abstracts infrastructure management.', '{"topic": "cloud", "category": "technology"}');
+
+-- Insert test chunks (without embeddings - for basic testing)
+-- Note: Real embeddings are 1536-dimensional vectors. These are placeholders.
+-- For full testing, use the ingestion pipeline or generate embeddings via API.
+INSERT INTO wd_chunks (document_id, content, chunk_index, metadata, token_count)
+SELECT id, content, 0, '{"chunk_type": "full_document"}', LENGTH(content)/4
+FROM wd_documents;
+```
+
+**Quick Test (without embeddings):**
+To test basic document listing without needing embeddings:
+```sql
+-- Verify documents
+SELECT id, title, source FROM wd_documents;
+
+-- Verify chunks
+SELECT c.id, c.chunk_index, d.title, LENGTH(c.content) as content_length
+FROM wd_chunks c JOIN wd_documents d ON c.document_id = d.id;
+```
+
+**Note:** For full vector search testing, you'll need to generate embeddings using the ingestion pipeline or OpenAI API. The `list_documents` and `get_document` tools work without embeddings.
+
+**Step 4: Verify Supabase setup**
+```sql
+SELECT COUNT(*) FROM wd_documents;
+SELECT COUNT(*) FROM wd_chunks;
+```
+
+### Prerequisites: Set Up Neo4j Aura (Free Tier)
+
+**Step 1: Create Neo4j Aura Account**
+1. Go to https://neo4j.com/cloud/aura-free/
+2. Sign up for a free account
+3. Create a new **AuraDB Free** instance
+4. Choose a region close to you
+5. **Save your credentials** - you'll only see the password once!
+
+**Step 2: Get Connection Details**
+After instance creation, you'll have:
+- **Connection URI**: `neo4j+s://xxxxxxxx.databases.neo4j.io`
+- **Username**: `neo4j`
+- **Password**: (the one you saved)
+
+**Step 3: Add to .env file**
+```bash
+NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password-here
+```
+
+**Step 4: Verify Neo4j Connection**
+```python
+# Quick test script
+from neo4j import GraphDatabase
+
+uri = "neo4j+s://xxxxxxxx.databases.neo4j.io"
+driver = GraphDatabase.driver(uri, auth=("neo4j", "your-password"))
+
+with driver.session() as session:
+    result = session.run("RETURN 'Connected!' AS message")
+    print(result.single()["message"])
+
+driver.close()
+```
+
+**Note:** Neo4j Aura Free includes:
+- 200K nodes, 400K relationships
+- 1 database
+- No credit card required
+- Perfect for development and testing
 
 ### Step 0: Copy RAG Pipeline Files
 
@@ -302,15 +365,18 @@ class Settings(BaseSettings):
     # Database Configuration
     database_url: str = Field(..., description="PostgreSQL connection URL")
 
-    # Neo4j Configuration
-    neo4j_uri: str = Field(default="bolt://localhost:7687", description="Neo4j connection URI")
-    neo4j_user: str = Field(default="neo4j", description="Neo4j username")
-    neo4j_password: str = Field(..., description="Neo4j password")
-
     # Embedding Configuration
     embedding_api_key: str = Field(..., description="API key for embeddings")
     embedding_model: str = Field(default="text-embedding-3-small", description="Embedding model")
     embedding_base_url: str = Field(default="https://api.openai.com/v1", description="Embedding API base URL")
+
+    # Neo4j Configuration (for Graphiti knowledge graph)
+    neo4j_uri: str = Field(..., description="Neo4j connection URI")
+    neo4j_user: str = Field(default="neo4j", description="Neo4j username")
+    neo4j_password: str = Field(..., description="Neo4j password")
+
+    # Feature Flags
+    use_graph_search: bool = Field(default=True, description="Enable graph search (requires Neo4j)")
 
     # Application Configuration
     log_level: str = Field(default="INFO")
@@ -408,6 +474,8 @@ from utils.db_utils import (
     get_document as db_get_document,
     list_documents as db_list_documents,
 )
+
+# Import graph utilities (Graphiti with Neo4j)
 from utils.graph_utils import (
     search_knowledge_graph,
     get_entity_relationships as graph_get_relationships,
@@ -767,7 +835,7 @@ async def main():
 
     welcome = Panel(
         "[bold blue]Hybrid RAG Knowledge Graph Agent[/bold blue]\n\n"
-        "[green]Vector + Graph search with streaming[/green]\n"
+        "[green]Vector + Hybrid + Graph search with streaming[/green]\n"
         "[dim]Type 'exit' to quit[/dim]",
         style="blue",
         padding=(1, 2)
@@ -776,7 +844,7 @@ async def main():
     console.print()
 
     # Initialize connections
-    console.print("[dim]Initializing database connections...[/dim]")
+    console.print("[dim]Initializing database and graph connections...[/dim]")
     await initialize_database()
     await initialize_graph()
     console.print("[green]Ready![/green]\n")
@@ -835,6 +903,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "asyncpg>=0.29.0",
     "graphiti-core>=0.5.0",
+    "neo4j>=5.0.0",
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
@@ -872,24 +941,14 @@ warn_unused_ignores = true
 # LLM Configuration (OpenAI-compatible)
 # =============================================================================
 LLM_API_KEY=sk-your-openai-api-key
-LLM_CHOICE=gpt-4
+LLM_MODEL=gpt-4
 LLM_BASE_URL=https://api.openai.com/v1
 
 # =============================================================================
 # Database Configuration (Supabase PostgreSQL)
 # =============================================================================
-# Format: postgresql://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
 # Get this from: Supabase Dashboard > Project Settings > Database > Connection String > URI
 DATABASE_URL=postgresql://postgres.xxxxxxxxxxxx:your-password@aws-0-us-east-1.pooler.supabase.com:6543/postgres
-
-# =============================================================================
-# Neo4j Configuration (for Knowledge Graph)
-# =============================================================================
-# Local: bolt://localhost:7687
-# Aura Cloud: neo4j+s://xxxxxxxx.databases.neo4j.io
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your-neo4j-password
 
 # =============================================================================
 # Embedding Configuration
@@ -897,7 +956,19 @@ NEO4J_PASSWORD=your-neo4j-password
 EMBEDDING_API_KEY=sk-your-openai-api-key
 EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_BASE_URL=https://api.openai.com/v1
-VECTOR_DIMENSION=1536
+
+# =============================================================================
+# Neo4j Configuration (Neo4j Aura Free)
+# =============================================================================
+# Get this from: Neo4j Aura Console after creating your free instance
+NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-neo4j-password
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+USE_GRAPH_SEARCH=true
 ```
 
 ### Step 8: Create Package Init Files
@@ -1174,18 +1245,18 @@ uv run ruff check --fix .
 
 ## Implementation Tasks (In Order)
 
-1. **Set Up Prerequisites** - Neo4j (Docker or Aura) + Supabase pgvector
-2. **Copy RAG Pipeline Files** - Copy `PRPs/examples/rag_pipeline/*` to project root maintaining structure
-3. **Create pyproject.toml** - Dependencies and project configuration
-4. **Create Settings** - `settings.py` with all environment variables
-5. **Create Providers** - `providers.py` following main_agent_reference pattern
-6. **Create Dependencies** - `dependencies.py` with dataclass for agent deps
-7. **Create Agent** - `agent.py` with system prompt and all 8 tools
-8. **Create CLI** - `cli.py` with Rich streaming interface
-9. **Create Package Init Files** - `utils/__init__.py` and `tests/__init__.py`
-10. **Create Environment Example** - `.env.example` with Supabase format
-11. **Create Tests** - `tests/test_agent.py` with TestModel validation
-12. **Run Schema SQL** - Execute `sql/schema.sql` in Supabase SQL Editor
+1. **Run Schema SQL** - Execute `sql/schema.sql` in Supabase SQL Editor + insert test data
+2. **Set Up Neo4j Aura** - Create free Neo4j Aura instance and get connection credentials
+3. **Copy RAG Pipeline Files** - Copy `PRPs/examples/rag_pipeline/*` to project root
+4. **Create pyproject.toml** - Dependencies and project configuration
+5. **Create Settings** - `settings.py` with environment variables (including Neo4j)
+6. **Create Providers** - `providers.py` following main_agent_reference pattern
+7. **Create Dependencies** - `dependencies.py` with dataclass for agent deps
+8. **Create Agent** - `agent.py` with system prompt and all 8 tools
+9. **Create CLI** - `cli.py` with Rich streaming interface
+10. **Create Package Init Files** - `utils/__init__.py` and `tests/__init__.py`
+11. **Create Environment File** - Copy `.env.example` to `.env` and fill in credentials
+12. **Create Tests** - `tests/test_agent.py` with TestModel validation
 13. **Validate All** - Run validation loop commands
 
 ---
@@ -1214,11 +1285,11 @@ This PRP has maximum confidence for one-pass implementation because:
 7. **Verified streaming API** - CLI uses correct Pydantic AI event types
 8. **Package structure** - All `__init__.py` files included
 9. **Database naming** - All objects use `wd_` prefix to avoid Supabase conflicts
-10. **Infrastructure setup** - Neo4j and Supabase setup instructions included
+10. **Simple cloud setup** - Neo4j Aura Free + Supabase (no Docker required)
 
-**All previous risks addressed:**
-- ✅ Database connection: Supabase URL format documented with example
-- ✅ Neo4j setup: Docker and Aura Cloud options provided
-- ✅ Import errors: Package `__init__.py` files included
-- ✅ API mismatches: Streaming code verified against Pydantic AI docs
-- ✅ Dependency issues: Complete pyproject.toml with versions
+**Setup Requirements:**
+- ✅ Supabase PostgreSQL with pgvector (run `schema.sql`)
+- ✅ Neo4j Aura Free (cloud-based, no installation needed)
+- ✅ OpenAI API key for LLM and embeddings
+- ✅ Test data included with sample INSERT statements
+- ✅ Full Graphiti knowledge graph integration

@@ -27,7 +27,13 @@
       "mcp__context7__resolve-library-id",
       "mcp__context7__query-docs",
       "Bash(npx @anthropic-ai/claude-code:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__search_docs",
+      "mcp__supabase__get_project_url",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(gzip:*)"
     ],
     "deny": []
   }
